@@ -21,19 +21,33 @@ def route(state):
     return "tools" if state["messages"][-1].get("tool_calls") else END
 
 
-def build_graph(settings,log,on_text,tools=None,on_step=None):
+async def select_model_context(messages,turn_start,selector,log,schema_units,budget=24000):
+    from hearthstone_assistant.memory.context import estimate
+    used=estimate(messages)+schema_units
+    if used<=budget:
+        return messages
+    log.emit("context_limit",estimate_units=used,budget=budget,status="rebuilding_history" if selector else "stopped")
+    if selector is None:
+        raise ValueError("当前工具上下文超过预算，本轮未提交；旧历史保留，请减少查询或新开会话。")
+    # 仅重建实际发送的上下文，不修改State中的原始工具链或会话原文。
+    selected = await selector(messages[turn_start:])
+    if estimate(selected)+schema_units>budget:
+        raise ValueError("当前工具上下文整理后仍超过预算，本轮未提交；旧历史保留。")
+    return selected
+
+
+def build_graph(settings,log,on_text,tools=None,on_step=None,context_selector=None,turn_start=0):
     async def model_node(state):
         step = state["requests"]+1
         if step>5: raise ValueError("模型请求次数达到5次上限")
-        from hearthstone_assistant.memory.context import estimate
         schema = definitions()
-        if estimate(state["messages"])+len(json.dumps(schema,ensure_ascii=False).encode())>24000:
-            raise ValueError("当前工具上下文超过预算，本轮未提交")
+        request_messages = await select_model_context(state["messages"],turn_start,context_selector,log,
+                              len(json.dumps(schema,ensure_ascii=False).encode()))
         log.emit("graph_node_start",node="model",step=step)
         if on_step:
             notice = on_step(step)
             if inspect.isawaitable(notice): await notice
-        reply = await collect_reply(settings,state["messages"],log,on_text,schema)
+        reply = await collect_reply(settings,request_messages,log,on_text,schema)
         calls = reply.get("tool_calls",[])
         ids = [call["id"] for call in calls]
         if len(calls)>3 or any(not i for i in ids) or len(ids)!=len(set(ids)) or set(ids).intersection(state["seen_ids"]):
@@ -67,14 +81,14 @@ def build_graph(settings,log,on_text,tools=None,on_step=None):
     return graph.compile()
 
 
-async def run_agent(settings,question,log,on_text,messages=None,on_step=None,return_messages=False,fingerprint="auto"):
+async def run_agent(settings,question,log,on_text,messages=None,on_step=None,return_messages=False,fingerprint="auto",context_selector=None):
     if fingerprint=="auto":
         from hearthstone_assistant.tools.cards.catalog import snapshot
         fingerprint=snapshot(settings.project_root)["fingerprint"]
     initial = messages if messages is not None else [{"role":"system","content":system_for(question)},{"role":"user","content":question}]
     with tracing_context(enabled=False):
         async with connect(settings,log,fingerprint) as tools:
-            result = await build_graph(settings,log,on_text,tools,on_step).ainvoke(
+            result = await build_graph(settings,log,on_text,tools,on_step,context_selector,len(initial)-1).ainvoke(
                 {"question":question,"messages":initial,"requests":0,"seen_ids":[]},{"recursion_limit":13})
     current = result["messages"][len(initial)-1:]
     return (result["answer"],current) if return_messages else result["answer"]

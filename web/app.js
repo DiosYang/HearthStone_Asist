@@ -4,6 +4,7 @@ const $ = id => document.getElementById(id);
 const state = {user: null, session: null, sessions: [], busy: false, controller: null, turn: null, authMode: 'login', tokenTotal: 0, timeTotal: 0, traceCount: 0};
 const labels = {turn_start:'任务开始',context_selected:'选取对话上下文',summary_start:'开始压缩旧对话',summary_saved:'摘要已保存',memory_injected:'参考已确认的偏好',answer_cache:'检查回答缓存',graph_node_start:'进入模型节点',model_request:'发起模型请求',first_text:'收到首个可见文本',model_stream_end:'模型流结束',graph_node_end:'模型节点完成',session_saved:'完整对话已保存',turn_cancelled:'当前任务已取消',turn_failed:'任务未完成',cache_write_failed:'缓存写入失败（历史已保留）'};
 Object.assign(labels,{prompt_selected:'选择本轮任务提示',mcp_connected:'连接只读卡牌 MCP',mcp_closed:'关闭卡牌 MCP',tool_start:'开始工具查询',tool_end:'工具查询返回'});
+Object.assign(labels,{context_limit:'检查工具回填后的上下文预算',context_ready:'请求上下文已就绪'});
 
 function toast(message) { $('toast').textContent = message; $('toast').classList.remove('hidden'); clearTimeout(toast.timer); toast.timer = setTimeout(() => $('toast').classList.add('hidden'), 5500); }
 function showAuth() { if (!$('auth-dialog').open) $('auth-dialog').showModal(); }
@@ -49,10 +50,10 @@ function observe(event) {
     state.timeTotal += event.seconds || 0; $('metric-time').textContent = state.timeTotal.toFixed(2);
     if (Number.isFinite(event.total_tokens)) { state.tokenTotal += event.total_tokens; $('metric-tokens').textContent = state.tokenTotal.toLocaleString(); }
   }
-  if (event.event === 'context_selected') {
+  if (event.event === 'context_selected' || event.event === 'context_ready') {
     $('context-progress').max = event.budget; $('context-progress').value = event.estimate_units;
     $('context-used').textContent = `${event.estimate_units.toLocaleString()} / ${event.budget.toLocaleString()}`;
-    $('summary-note').textContent = event.summary_used ? `已使用旧对话摘要，覆盖至第 ${event.summary_through} 轮。原文仍在历史中。` : '当前使用原始对话上下文，尚不需要摘要。';
+    if(event.event === 'context_selected') $('summary-note').textContent = event.summary_used ? `已使用旧对话摘要，覆盖至第 ${event.summary_through} 轮。原文仍在历史中。` : '当前使用原始对话上下文，尚不需要摘要。';
   }
 }
 function bubble(role, content = '', status = '') {

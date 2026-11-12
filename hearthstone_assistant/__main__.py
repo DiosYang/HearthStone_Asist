@@ -85,7 +85,7 @@ def main():
 
 async def chat_once(settings, question, log, store, user, session, use_cache=True):
     from hearthstone_assistant.agents.run import run_agent
-    from hearthstone_assistant.memory.context import prepare_context
+    from hearthstone_assistant.memory.context import turn_context
     from hearthstone_assistant.cache.answers import request_key
     from hearthstone_assistant.tools.cards.catalog import snapshot
     from hearthstone_assistant.tools.cards.client import definitions
@@ -94,7 +94,8 @@ async def chat_once(settings, question, log, store, user, session, use_cache=Tru
     log.emit("prompt_selected",profile=profile(question))
     turns = store.turns(user, session)
     reserve = len(json.dumps(definitions(),ensure_ascii=False).encode())+128
-    messages = await prepare_context(settings, store, user, session, turns, question, log,budget=24000-reserve)
+    select_context = turn_context(settings,store,user,session,turns,question,log,tool_units=reserve)
+    messages = await select_context([{"role":"user","content":question}])
     source = snapshot(settings.project_root)
     key = request_key(settings, messages,card_snapshot=source["fingerprint"])
     cached = store.cached_answer(user, session, key) if use_cache else None
@@ -109,7 +110,7 @@ async def chat_once(settings, question, log, store, user, session, use_cache=Tru
     try:
         answer,transcript = await run_agent(settings, question, log, messages=messages,
                                  on_text=lambda text: print(text, end="", flush=True),
-                                 return_messages=True,fingerprint=source["fingerprint"])
+                                 return_messages=True,fingerprint=source["fingerprint"],context_selector=select_context)
         store.append(user, session, question, answer, expected_count=len(turns),messages=transcript)
         log.emit("session_saved", status="ok")
         if use_cache:
