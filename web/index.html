@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="炉边：一个有记忆、有边界的炉石传说学习助手。">
+  <meta name="theme-color" content="#172722"><title>炉边 · 炉石小助手</title>
+  <link rel="icon" href="/web/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/web/style.css"><script type="module" src="/web/app.js"></script>
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar">
+    <a class="brand" href="/" aria-label="炉边首页"><span class="brand-mark">炉</span><span>炉边<small>HEARTHSIDE ASSISTANT</small></span></a>
+    <button id="new-chat" class="new-chat" title="新对话 · Alt+N"><span>＋</span> 开启新对话 <kbd>⌥N</kbd></button>
+    <div class="nav-label">你的酒馆 <span>PRIVATE SPACE</span></div>
+    <label class="search-box"><span>⌕</span><input id="session-search" type="search" placeholder="查找对话" aria-label="查找对话"></label>
+    <div class="sessions-heading">最近对话 <span id="session-count">—</span></div>
+    <nav id="sessions" class="sessions" aria-label="会话列表"><p class="sidebar-empty">登录后，你的对话会保存在这里。</p></nav>
+    <div class="sidebar-bottom"><div class="privacy-note"><span class="status-dot"></span><div>独立会话，安心讨论<small>你的历史与其他用户隔离</small></div></div>
+      <button class="profile-button" id="profile"><span class="avatar" id="user-avatar">?</span><span id="username">尚未登录</span><span class="profile-action">偏好 ↗</span></button>
+      <button class="logout-button" id="logout">退出登录</button>
+    </div>
+  </aside>
+  <div class="workspace">
+    <header class="topbar"><div class="topbar-left"><button class="icon-button mobile-menu" id="menu" aria-label="展开会话菜单">☰</button><span class="breadcrumb">工作台 <span>/</span> <b>对话</b></span></div><div class="topbar-right"><span class="model-pill"><i></i> <span id="model-name">DeepSeek</span></span><button id="toggle-inspector" class="inspector-toggle" aria-expanded="true">◫ <span>本轮观察</span></button></div></header>
+    <main class="main-layout">
+      <section class="chat-column" aria-label="炉石助手对话">
+        <div class="chat-heading"><div><span class="eyebrow">YOUR NEXT PLAY, THOUGHT THROUGH.</span><h1 id="chat-title">每一手，都值得想一想。</h1></div><span class="mode-tag">炉石学习助手</span></div>
+        <div class="chat-scroll" id="chat-scroll">
+          <section class="welcome" id="welcome">
+            <div class="welcome-hero"><div class="hero-copy"><span class="hero-kicker"><span>✦</span> 欢迎来到炉边</span><h2>坐下来，<br>聊聊你的下一手。</h2><p>从节奏取舍到套牌思路，<br>一起把每个「为什么」想得更清楚。</p><span class="hero-footnote">不替你出牌，只帮你理解选择。</span></div><div class="card-art" aria-hidden="true"><div class="art-orbit"></div><div class="art-card back-card"></div><div class="art-card front-card"><span class="card-corner">✦</span><div class="card-sigil">◎</div><div class="card-lines"><i></i><i></i><i></i></div><span class="card-bottom">HEARTHSIDE</span></div><span class="art-spark spark-one">✧</span><span class="art-spark spark-two">✦</span></div></div>
+            <div class="suggestions-title">不知道从哪开始？<span>选一个话题，填入下方再发送</span></div>
+            <div class="suggestions">
+              <button class="suggestion" data-prompt="请用一个简单的对局例子，解释炉石里的节奏和价值有什么区别。"><span class="suggestion-icon">◇</span><strong>理解节奏与价值</strong><p>什么时候该抢场，什么时候该赚牌？</p><span class="suggestion-arrow">↗</span></button>
+              <button class="suggestion" data-prompt="我想学习起手留牌。请先问清楚我的职业、套牌思路和对手，再帮我分析。"><span class="suggestion-icon">♧</span><strong>聊聊起手留牌</strong><p>从你的套牌和对手，找到思考方向。</p><span class="suggestion-arrow">↗</span></button>
+              <button class="suggestion" data-prompt="请解释控制、快攻和组合技套牌的主要区别，并帮我判断哪种风格适合我。"><span class="suggestion-icon">⌘</span><strong>找到你的套牌风格</strong><p>快攻、控制，还是一场漂亮的组合技？</p><span class="suggestion-arrow">↗</span></button>
+            </div>
+            <div class="evidence-note"><span>ⓘ</span><p>当前版本还未接入实时卡牌与天梯数据。涉及最新补丁、卡牌数值或胜率时，请以可靠来源为准。</p></div>
+          </section>
+          <div id="messages" class="messages" aria-live="polite" aria-relevant="additions"></div>
+        </div>
+        <div class="composer-area"><div class="composer"><label class="sr-only" for="question">输入你的炉石问题</label><textarea id="question" rows="2" maxlength="4000" placeholder="说说你的问题，或者描述一下你正在纠结的那一手…"></textarea><div class="composer-bottom"><div class="composer-tools"><span>✦ <span id="composer-status">准备好，一起想一想</span></span><label class="cache-control"><input id="use-cache" type="checkbox" checked> 允许精确缓存</label></div><button class="send-button" id="send" aria-label="发送问题"><span>发送</span> ↑</button><button class="stop-button hidden" id="stop">■ 停止生成</button></div></div><div class="composer-caption"><span>Enter 发送 · Shift + Enter 换行</span><span>模型可能出错，请核对重要信息。</span></div></div>
+      </section>
+      <aside class="inspector" id="inspector" aria-label="本轮运行观察">
+        <div class="inspector-title"><span>◫ 本轮观察</span><span class="live-label" id="run-state">待开始</span></div><p class="inspector-description">让回答背后的过程，也看得见。</p>
+        <section class="inspector-section"><h3>运行概览</h3><dl class="stats"><div><dt>首个可见文本</dt><dd id="metric-first">—<small> s</small></dd></div><div><dt>模型总耗时</dt><dd id="metric-time">—<small> s</small></dd></div><div><dt>累计 Token</dt><dd id="metric-tokens">—</dd></div><div><dt>回答缓存</dt><dd id="metric-cache" class="small-stat">未检查</dd></div></dl></section>
+        <section class="inspector-section"><h3>上下文预算 <span class="tiny-badge">估算</span></h3><progress id="context-progress" max="24000" value="0" aria-label="上下文预算使用量"></progress><div class="budget-numbers"><span id="context-used">— / 24,000</span><span>含输出预留</span></div><p class="helper" id="summary-note">历史变长时按预算摘要；原始对话仍保留。</p></section>
+        <section class="inspector-section flow-section"><h3>执行轨迹 <span id="trace-count">0</span></h3><ol class="trace" id="trace"><li class="trace-placeholder">发送一条消息后，真实运行事件会显示在这里。</li></ol></section>
+        <div class="inspector-footer"><span class="status-dot"></span> LangGraph · LangChain · SQLite<p>MCP 工具尚未接入 · 无自动操作游戏</p><code id="run-id">尚无运行编号</code></div>
+      </aside>
+    </main>
+  </div>
+</div>
+<div id="toast" class="toast hidden" role="status"></div>
+<dialog id="auth-dialog" aria-labelledby="auth-title"><form id="auth-form" class="auth-form"><div class="auth-brand"><span class="brand-mark">炉</span><span>炉边 <small>HEARTHSIDE</small></span></div><div class="auth-tabs"><button type="button" id="login-tab" class="active">登录</button><button type="button" id="register-tab">创建账号</button></div><h2 id="auth-title">欢迎回到你的酒馆</h2><p id="auth-description">登录后，继续你的思考与对话。</p><label>用户名<input id="auth-username" autocomplete="username" required pattern="[A-Za-z0-9_]{3,32}" minlength="3" maxlength="32" placeholder="3—32位字母、数字或下划线"></label><label>密码<input id="auth-password" type="password" autocomplete="current-password" required minlength="10" maxlength="128" placeholder="至少10位"></label><p class="form-error" id="auth-error" role="alert"></p><button class="primary-button" id="auth-submit">进入炉边 →</button><p class="auth-footnote">账号仅属于这个服务。无需提供战网密码或 DeepSeek Key。</p></form></dialog>
+<dialog id="preferences-dialog" aria-labelledby="preferences-title"><form id="preferences-form"><div class="dialog-heading"><div><span class="eyebrow">YOUR PLAYSTYLE</span><h2 id="preferences-title">让炉边更懂你的偏好</h2></div><button type="button" class="icon-button" id="close-preferences" aria-label="关闭偏好">×</button></div><p class="dialog-description">只有你主动保存的内容才会成为长期偏好，跨会话参考；本次要求始终优先。</p><label>偏好职业<input name="favorite_class" maxlength="60" placeholder="例如：法师、牧师，或者还在探索"></label><label>套牌风格<input name="play_style" maxlength="100" placeholder="例如：喜欢控制，享受资源博弈"></label><label>合成预算<input name="budget" maxlength="100" placeholder="例如：低尘预算，优先利用已有卡牌"></label><label>回答方式<input name="answer_style" maxlength="100" placeholder="例如：简洁一些，用例子解释术语"></label><p class="form-error" id="preferences-error" role="alert"></p><div class="dialog-actions"><button type="button" class="secondary-button" id="clear-preferences">删除全部偏好</button><button class="primary-button" id="save-preferences">保存偏好</button></div><p class="auth-footnote">删除偏好不会自动清除旧聊天和日志。</p></form></dialog>
+</body></html>

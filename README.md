@@ -2,6 +2,8 @@
 
 一个逐步开发的炉石传说学习助手：**网页版客户端 + FastAPI服务端 + LangChain/DeepSeek + LangGraph + SQLite**。不使用Docker，暂不接工具或自动操作游戏。
 
+非暴雪官方产品，当前不提供实时游戏数据。
+
 网页源码独立放在 `web/`。服务端持有模型Key，浏览器只通过同源API交互；不需要Node构建，也不依赖外部CDN。
 
 ## 已实现

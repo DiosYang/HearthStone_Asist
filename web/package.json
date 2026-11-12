@@ -1,0 +1,1 @@
+{"name":"hearthside-web","private":true,"type":"module","scripts":{"test":"node --check app.js && node --test sse.test.js"}}
