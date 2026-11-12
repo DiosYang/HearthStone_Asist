@@ -6,7 +6,7 @@ import uuid
 
 ALLOWED_FIELDS = {"model", "key_configured", "step", "tool", "status", "error_type",
                   "seconds", "prompt_tokens", "completion_tokens", "total_tokens", "finish_reason", "node",
-                  "stage", "estimate_units", "budget", "summary_used", "summary_through"}
+                  "stage", "estimate_units", "budget", "summary_used", "summary_through", "profile"}
 
 
 class EventLog:
@@ -27,7 +27,8 @@ class EventLog:
         self.sequence += 1
         record = {"time": datetime.now(timezone.utc).isoformat(), "run_id": self.run_id,
                   "sequence": self.sequence, "event": event,
-                  "user_id": self.user_id, "session_id": self.session_id, **fields}
+                  "user_id": self.user_id, "session_id": self.session_id,
+                  "turn_id":getattr(self,"turn_id",None), **fields}
         line = json.dumps(record, ensure_ascii=False, allow_nan=False)
         with self.path.open("a", encoding="utf-8") as stream:
             stream.write(line + "\n")

@@ -7,7 +7,7 @@ import secrets
 import sqlite3
 import time
 import uuid
-from hearthstone_assistant.storage.sqlite import SessionStore
+from hearthstone_assistant.storage.sqlite import SessionStore,transcript_json
 
 
 def digest(token):
@@ -112,16 +112,17 @@ class Records(SessionStore):
             result["answer"] = answer["answer"] if answer else None
         return result
 
-    def complete_request(self, user, session, turn_id, question, answer, expected_count):
+    def complete_request(self, user, session, turn_id, question, answer, expected_count, messages=None):
         # 完整轮次和任务终态在同一SQLite事务内提交。
         self.require(user, session)
+        payload=transcript_json(question,answer,messages)
         with self.db:
             self.db.execute("BEGIN IMMEDIATE")
             count = self.db.execute("SELECT COUNT(*) FROM turns WHERE user_id=? AND session_id=?", (user,session)).fetchone()[0]
             status = self.db.execute("SELECT status FROM requests WHERE id=? AND user_id=? AND session_id=?", (turn_id,user,session)).fetchone()
             if count != expected_count or not status or status["status"] != "running":
                 raise ValueError("任务状态或会话版本冲突")
-            self.db.execute("INSERT INTO turns VALUES(?,?,?,?,?,CURRENT_TIMESTAMP)", (user,session,count+1,question,answer))
+            self.db.execute("INSERT INTO turns(user_id,session_id,number,question,answer,messages_json) VALUES(?,?,?,?,?,?)", (user,session,count+1,question,answer,payload))
             self.db.execute("UPDATE requests SET status='completed',turn_number=? WHERE id=? AND user_id=? AND session_id=?", (count+1,turn_id,user,session))
 
     def fail_request(self, user, session, turn_id, status):

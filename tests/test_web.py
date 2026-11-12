@@ -78,7 +78,7 @@ class WebTests(unittest.TestCase):
         store.close()
         body = {"question":question,"request_id":"a"*32}
         # 仅加禁止联网护栏，不提供任何模拟模型输出。
-        with patch("hearthstone_assistant.agents.run.stream_reply", side_effect=AssertionError("不允许模型请求")):
+        with patch("hearthstone_assistant.agents.run.collect_reply", side_effect=AssertionError("不允许模型请求")):
             response = self.client.post(f"/api/sessions/{session}/turns", json=body)
         self.assertEqual(response.status_code, 200)
         events = [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")]
@@ -95,6 +95,15 @@ class WebTests(unittest.TestCase):
         logs = self.client.get(f"/api/sessions/{session}/turns/{turn_id}/events").json()["events"]
         self.assertTrue(any(e["event"]=="session_saved" for e in logs))
         self.assertNotIn("offline-only", json.dumps(logs))
+        text_log=self.client.get(f"/api/sessions/{session}/log")
+        self.assertEqual(text_log.status_code,200)
+        self.assertIn("用户输入",text_log.text)
+        self.assertIn("缓存返回",text_log.text)
+        self.assertIn("缓存组件验收",text_log.text)
+        self.assertNotIn("offline-only",text_log.text)
+        self.client.post("/api/auth/logout",json={})
+        self.account("log_reader")
+        self.assertEqual(self.client.get(f"/api/sessions/{session}/log").status_code,404)
 
     def test_static_files_and_no_credential_leak(self):
         self.assertEqual(self.client.get("/").status_code, 200)
@@ -110,7 +119,7 @@ class WebTests(unittest.TestCase):
         store = Records(self.root/"data/assistant.sqlite3")
         store.append(user["id"],session,"很长"*13000,"旧回复",0)
         store.close()
-        with patch("hearthstone_assistant.agents.run.stream_reply",side_effect=AssertionError("不允许联网")), patch("hearthstone_assistant.memory.context.stream_reply",side_effect=AssertionError("不允许摘要联网")):
+        with patch("hearthstone_assistant.agents.run.collect_reply",side_effect=AssertionError("不允许联网")), patch("hearthstone_assistant.memory.context.stream_reply",side_effect=AssertionError("不允许摘要联网")):
             response = self.client.post(f"/api/sessions/{session}/turns",json={"question":"继续","request_id":"b"*32})
         events = [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")]
         self.assertTrue(any(e["type"]=="turn_failed" for e in events))
@@ -140,7 +149,7 @@ class WebTests(unittest.TestCase):
             self.assertEqual((await repo.call("request_status",user,a,a))["status"],"cancelled")
             self.assertEqual(await repo.call("turns",user,a),[])
             self.assertEqual((await repo.call("request_status",user,b,b))["status"],"completed")
-        with patch("hearthstone_assistant.agents.run.stream_reply",side_effect=AssertionError("不允许模型联网")):
+        with patch("hearthstone_assistant.agents.run.collect_reply",side_effect=AssertionError("不允许模型联网")):
             asyncio.run(check())
 
 

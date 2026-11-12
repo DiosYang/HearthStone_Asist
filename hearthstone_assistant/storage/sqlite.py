@@ -2,6 +2,27 @@ import re
 import sqlite3
 import uuid
 import time
+import json
+
+
+def transcript_json(question, answer, messages=None):
+    messages = messages or [{"role":"user","content":question},{"role":"assistant","content":answer}]
+    if messages[0] != {"role":"user","content":question} or messages[-1].get("role")!="assistant" or messages[-1].get("content")!=answer:
+        raise ValueError("完整轮次起止消息不一致")
+    pending,seen = set(),set()
+    for message in messages[1:]:
+        role=message.get("role")
+        if role=="assistant":
+            if pending: raise ValueError("工具结果未完整回填")
+            for call in message.get("tool_calls",[]):
+                if not isinstance(call.get("id"),str) or not call["id"] or call["id"] in seen: raise ValueError("工具ID重复或无效")
+                pending.add(call["id"]);seen.add(call["id"])
+        elif role=="tool":
+            if message.get("tool_call_id") not in pending: raise ValueError("工具结果没有对应请求")
+            pending.remove(message["tool_call_id"])
+        else: raise ValueError("本轮只能包含assistant/tool消息")
+    if pending or messages[-1].get("tool_calls"): raise ValueError("轮次未完整结束")
+    return json.dumps(messages,ensure_ascii=False,allow_nan=False)
 
 
 class SessionStore:
@@ -35,6 +56,9 @@ class SessionStore:
             PRIMARY KEY(user_id,session_id,cache_key),
             FOREIGN KEY(user_id,session_id) REFERENCES sessions(user_id,id));
         """)
+        if "messages_json" not in {row["name"] for row in self.db.execute("PRAGMA table_info(turns)")}:
+            self.db.execute("ALTER TABLE turns ADD COLUMN messages_json TEXT")
+            self.db.commit()
 
     def ensure_user(self, user):
         if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", user):
@@ -59,19 +83,25 @@ class SessionStore:
 
     def turns(self, user, session):
         self.require(user, session)
-        return [dict(r) for r in self.db.execute(
-            "SELECT number,question,answer FROM turns WHERE user_id=? AND session_id=? ORDER BY number", (user, session))]
+        rows = []
+        for row in self.db.execute("SELECT number,question,answer,messages_json FROM turns WHERE user_id=? AND session_id=? ORDER BY number",(user,session)):
+            value=dict(row)
+            payload=value.pop("messages_json")
+            if payload: value["messages"]=json.loads(payload)
+            rows.append(value)
+        return rows
 
-    def append(self, user, session, question, answer, expected_count):
+    def append(self, user, session, question, answer, expected_count, messages=None):
         self.require(user, session)
+        payload = transcript_json(question,answer,messages)
         # 乐观并发检查：不把基于旧上下文生成的回复追加到已变化会话。
         with self.db:
             self.db.execute("BEGIN IMMEDIATE")
             count = self.db.execute("SELECT COUNT(*) FROM turns WHERE user_id=? AND session_id=?", (user, session)).fetchone()[0]
             if count != expected_count:
                 raise ValueError("会话已被另一进程更新，本次回复未提交")
-            self.db.execute("INSERT INTO turns VALUES(?,?,?,?,?,CURRENT_TIMESTAMP)",
-                            (user, session, count+1, question, answer))
+            self.db.execute("INSERT INTO turns(user_id,session_id,number,question,answer,messages_json) VALUES(?,?,?,?,?,?)",
+                            (user, session, count+1, question, answer,payload))
 
     def summary(self, user, session):
         self.require(user, session)

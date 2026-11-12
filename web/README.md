@@ -4,7 +4,7 @@
 
 - index.html：三栏布局、注册/登录、偏好表单。
 - style.css：桌面/手机布局、键盘焦点和减少动画支持。
-- app.js：会话、历史、偏好、fetch流式交互、停止、真实观测。
+- app.js：会话、历史、偏好、fetch流式交互、停止、真实观测、卡库状态和鉴权下载本会话log.txt。
 - sse.js：跨chunk的UTF8/SSE解析。
 - sse.test.js：真实ReadableStream的协议单元检查。
 

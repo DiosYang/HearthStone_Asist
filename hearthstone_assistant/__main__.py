@@ -1,9 +1,13 @@
 """用户/会话隔离的流式问答；SQLite历史、预算摘要与精确缓存。"""
 import argparse
 import asyncio
+import json
+import sqlite3
+import uuid
 from hearthstone_assistant.config import load_settings
 from hearthstone_assistant.config import PROJECT_ROOT
 from hearthstone_assistant.log import EventLog
+from hearthstone_assistant.log.session import SessionLog
 
 
 def main():
@@ -54,9 +58,12 @@ def main():
                 return
             session = args.session or store.create(args.user)
             store.require(args.user, session)
-            log.user_id, log.session_id = args.user, session
+            log = SessionLog(PROJECT_ROOT / "data" / "logs",args.user,session,uuid.uuid4().hex,
+                             secrets=(settings.api_key,))
+            log.emit("run_start")
             print("用户：", args.user, "会话：", session)
-            print("真实流式调用；可能另产生摘要费用。当前无工具/长期偏好。Ctrl+C取消。")
+            print("文本日志：", log.text_path)
+            print("真实流式调用，支持卡牌MCP；可能另产生摘要费用。Ctrl+C取消。")
             question = input("你> ").strip()
             if not question:
                 log.emit("run_end", status="empty_input")
@@ -80,24 +87,34 @@ async def chat_once(settings, question, log, store, user, session, use_cache=Tru
     from hearthstone_assistant.agents.run import run_agent
     from hearthstone_assistant.memory.context import prepare_context
     from hearthstone_assistant.cache.answers import request_key
+    from hearthstone_assistant.tools.cards.catalog import snapshot
+    from hearthstone_assistant.tools.cards.client import definitions
+    from hearthstone_assistant.prompt.routing import profile
+    log.detail("用户输入",{"question":question})
+    log.emit("prompt_selected",profile=profile(question))
     turns = store.turns(user, session)
-    messages = await prepare_context(settings, store, user, session, turns, question, log)
-    key = request_key(settings, messages)
+    reserve = len(json.dumps(definitions(),ensure_ascii=False).encode())+128
+    messages = await prepare_context(settings, store, user, session, turns, question, log,budget=24000-reserve)
+    source = snapshot(settings.project_root)
+    key = request_key(settings, messages,card_snapshot=source["fingerprint"])
     cached = store.cached_answer(user, session, key) if use_cache else None
     log.emit("answer_cache", status="hit" if cached is not None else "miss" if use_cache else "bypassed")
     if cached is not None:
+        log.detail("缓存返回（没有再次请求模型/工具）",{"answer":cached,"card_snapshot":source["fingerprint"]})
         print("助手（15分钟内的相同上下文缓存，未重新请求模型）> ", cached)
         store.append(user, session, question, cached, expected_count=len(turns))
         log.emit("session_saved", status="ok")
         return
     print("助手> ", end="", flush=True)
     try:
-        answer = await run_agent(settings, question, log, messages=messages,
-                                 on_text=lambda text: print(text, end="", flush=True))
-        if use_cache:
-            store.cache_answer(user, session, key, answer)
-        store.append(user, session, question, answer, expected_count=len(turns))
+        answer,transcript = await run_agent(settings, question, log, messages=messages,
+                                 on_text=lambda text: print(text, end="", flush=True),
+                                 return_messages=True,fingerprint=source["fingerprint"])
+        store.append(user, session, question, answer, expected_count=len(turns),messages=transcript)
         log.emit("session_saved", status="ok")
+        if use_cache:
+            try: store.cache_answer(user, session, key, answer)
+            except sqlite3.Error: log.emit("cache_write_failed",status="history_saved")
     finally:
         print()
 

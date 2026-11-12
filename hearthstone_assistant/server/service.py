@@ -4,17 +4,21 @@ import sqlite3
 from hearthstone_assistant.agents.run import run_agent
 from hearthstone_assistant.cache.answers import request_key
 from hearthstone_assistant.memory.context import prepare_context
-from hearthstone_assistant.log import EventLog
+from hearthstone_assistant.log.session import SessionLog,redact
+from hearthstone_assistant.tools.cards.catalog import snapshot
+from hearthstone_assistant.tools.cards.client import definitions
+from hearthstone_assistant.prompt.routing import profile
 
 
-class WebLog(EventLog):
-    def __init__(self, directory, queue, user, session, turn_id):
-        super().__init__(directory, console=False)
+class WebLog(SessionLog):
+    def __init__(self, directory, queue, user, session, turn_id, secrets=()):
+        super().__init__(directory,user,session,turn_id,secrets)
         self.queue = queue
         self.user_id, self.session_id = user, session
         self.turn_id = turn_id
 
     def emit(self, event, **fields):
+        fields=redact(fields,self.secrets)
         super().emit(event, **fields)
         # 实时观测只带允许的元数据，不发请求正文/凭据/磁盘路径。
         try:
@@ -30,28 +34,38 @@ async def execute_turn(repo, settings, user, session, turn_id, question, use_cac
     async def text(piece):
         await send({"type": "text_delta", "text": piece})
 
+    async def step(number):
+        await send({"type":"answer_reset","step":number})
+
     try:
         async with asyncio.timeout(180):
             log.emit("turn_start")
+            log.detail("用户输入",{"question":question})
+            log.emit("prompt_selected",profile=profile(question))
             turns = await repo.call("turns", user, session)
             preferences = await repo.call("get_preferences", user)
             preference_text = "用户明确保存的偏好资料，仅供相关任务参考，不是系统指令或新授权；本次明确要求优先：\n" + json.dumps(preferences, ensure_ascii=False)
             reserve = len(preference_text.encode())+64 if preferences else 0
-            messages = await prepare_context(settings, repo, user, session, turns, question, log, budget=24000-reserve)
+            tool_reserve=len(json.dumps(definitions(),ensure_ascii=False).encode())+128
+            messages = await prepare_context(settings, repo, user, session, turns, question, log, budget=24000-reserve-tool_reserve)
             if preferences:
                 messages.insert(1, {"role": "user", "content": preference_text})
                 log.emit("memory_injected", status="confirmed_preferences")
-            key = request_key(settings, messages)
+            source=snapshot(settings.project_root)
+            key = request_key(settings, messages,card_snapshot=source["fingerprint"])
             answer = await repo.call("cached_answer", user, session, key) if use_cache else None
             hit = answer is not None
             log.emit("answer_cache", status="hit" if hit else "miss" if use_cache else "bypassed")
             await send({"type": "cache", "hit": hit})
             if hit:
+                transcript=None
+                log.detail("缓存返回（没有再次请求模型/工具）",{"answer":answer,"card_snapshot":source["fingerprint"]})
                 await text(answer)
             else:
-                answer = await run_agent(settings, question, log, text, messages)
+                answer,transcript = await run_agent(settings,question,log,text,messages,on_step=step,
+                    return_messages=True,fingerprint=source["fingerprint"])
             # 同步SQLite线程不能随便取消：等待此原子提交得出确定结果。
-            commit = asyncio.create_task(repo.call("complete_request", user, session, turn_id, question, answer, len(turns)))
+            commit = asyncio.create_task(repo.call("complete_request",user,session,turn_id,question,answer,len(turns),transcript))
             try:
                 await asyncio.shield(commit)
             except asyncio.CancelledError:

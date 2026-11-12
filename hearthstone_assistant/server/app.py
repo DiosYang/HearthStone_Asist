@@ -10,6 +10,8 @@ import uuid
 from fastapi import FastAPI, Depends, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from hearthstone_assistant.log.session import session_directory
+from hearthstone_assistant.tools.cards.catalog import snapshot
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from pydantic import BaseModel, ConfigDict, Field
@@ -180,6 +182,18 @@ def create_app(root=PROJECT_ROOT, settings=None):
     async def preferences(user=Depends(current_user)):
         return {"preferences": await repo.call("get_preferences", user["id"])}
 
+    @app.get("/api/card-data")
+    async def card_data(user=Depends(current_user)):
+        value = await asyncio.to_thread(snapshot,root)
+        return {"ready":bool(value.get("fingerprint")),"source":value}
+
+    @app.get("/api/sessions/{session}/log")
+    async def session_log(session: str,user=Depends(current_user)):
+        await own(user,session)
+        path=session_directory(root/"data/logs",user["id"],session)/"log.txt"
+        if not path.is_file(): raise HTTPException(404,"本会话尚无文本日志；旧日志不会伪造补录")
+        return FileResponse(path,media_type="text/plain; charset=utf-8",filename=f"session-{session}-log.txt")
+
     @app.put("/api/preferences")
     async def save_preferences(body: Preferences, user=Depends(current_user)):
         await repo.call("put_preferences", user["id"], body.model_dump())
@@ -199,10 +213,15 @@ def create_app(root=PROJECT_ROOT, settings=None):
             run_id = state["run_id"]
             if not run_id or len(run_id) != 32 or any(c not in "0123456789abcdef" for c in run_id):
                 return []
-            path = root / "data" / "logs" / (run_id + ".jsonl")
+            path=session_directory(root/"data/logs",user["id"],session)/(run_id+".jsonl")
+            if not path.exists(): path=root/"data/logs"/(run_id+".jsonl")  # 兼容旧的每轮日志
             if not path.exists():
                 return []
-            return [json.loads(line) for line in path.read_text().splitlines()][-200:]
+            rows=[]
+            for line in path.read_text().splitlines():
+                try: rows.append(json.loads(line))
+                except ValueError: pass  # 正在写的最后半行不冒充事件
+            return rows[-200:]
         return {"events": await asyncio.to_thread(read)}
 
     @app.post("/api/sessions/{session}/turns/{turn_id}/cancel")
@@ -225,7 +244,7 @@ def create_app(root=PROJECT_ROOT, settings=None):
         fingerprint = hashlib.sha256(json.dumps([question,body.use_cache]).encode()).hexdigest()
         queue = asyncio.Queue(maxsize=128)
         turn_id = uuid.uuid4().hex
-        log = WebLog(root / "data" / "logs", queue, user["id"], session, turn_id)
+        log = WebLog(root/"data/logs",queue,user["id"],session,turn_id,secrets=(settings.api_key,))
         async with gate:
             if any(item[1:] == (user["id"],session) for item in running.values()):
                 raise HTTPException(409, "当前会话已有任务，请先等待或取消")

@@ -3,6 +3,7 @@ import {consumeSSE} from './sse.js';
 const $ = id => document.getElementById(id);
 const state = {user: null, session: null, sessions: [], busy: false, controller: null, turn: null, authMode: 'login', tokenTotal: 0, timeTotal: 0, traceCount: 0};
 const labels = {turn_start:'任务开始',context_selected:'选取对话上下文',summary_start:'开始压缩旧对话',summary_saved:'摘要已保存',memory_injected:'参考已确认的偏好',answer_cache:'检查回答缓存',graph_node_start:'进入模型节点',model_request:'发起模型请求',first_text:'收到首个可见文本',model_stream_end:'模型流结束',graph_node_end:'模型节点完成',session_saved:'完整对话已保存',turn_cancelled:'当前任务已取消',turn_failed:'任务未完成',cache_write_failed:'缓存写入失败（历史已保留）'};
+Object.assign(labels,{prompt_selected:'选择本轮任务提示',mcp_connected:'连接只读卡牌 MCP',mcp_closed:'关闭卡牌 MCP',tool_start:'开始工具查询',tool_end:'工具查询返回'});
 
 function toast(message) { $('toast').textContent = message; $('toast').classList.remove('hidden'); clearTimeout(toast.timer); toast.timer = setTimeout(() => $('toast').classList.add('hidden'), 5500); }
 function showAuth() { if (!$('auth-dialog').open) $('auth-dialog').showModal(); }
@@ -22,6 +23,7 @@ function setBusy(busy) {
   $('send').classList.toggle('hidden', busy); $('stop').classList.toggle('hidden', !busy);
   $('question').disabled = busy; $('use-cache').disabled = busy; $('new-chat').disabled = busy;
   $('profile').disabled = busy;
+  $('download-log').disabled = busy || !state.session;
   document.querySelectorAll('.session-button,.suggestion').forEach(button => button.disabled = busy);
   $('composer-status').textContent = busy ? '正在认真想这一手…' : '准备好，一起想一想';
   $('run-state').classList.toggle('active', busy);
@@ -38,7 +40,7 @@ function resetInspector() {
 function observe(event) {
   const item = document.createElement('li'); item.textContent = labels[event.event] || event.event;
   const small = document.createElement('small');
-  small.textContent = [event.stage === 'summary' ? '摘要请求（单独计费）' : '', event.status || '', event.seconds !== undefined ? `${event.seconds}s` : ''].filter(Boolean).join(' · ');
+  small.textContent = [event.stage === 'summary' ? '摘要请求（单独计费）' : '', event.tool || event.profile || '', event.status || '', event.seconds !== undefined ? `${event.seconds}s` : ''].filter(Boolean).join(' · ');
   if (small.textContent) item.append(small);
   $('trace').append(item); state.traceCount++; $('trace-count').textContent = state.traceCount;
   $('trace').scrollTop = $('trace').scrollHeight;
@@ -66,6 +68,7 @@ function bubble(role, content = '', status = '') {
   return {element,text,hint};
 }
 function renderSessions() {
+  $('download-log').disabled = state.busy || !state.session;
   const filter = $('session-search').value.trim().toLowerCase();
   $('sessions').replaceChildren(); $('session-count').textContent = state.sessions.length;
   for (const session of state.sessions.filter(s => (s.title || '新对话').toLowerCase().includes(filter))) {
@@ -100,6 +103,8 @@ async function afterLogin(user) {
   state.user = user; $('username').textContent = user.username; $('user-avatar').textContent = user.username[0].toUpperCase();
   if ($('auth-dialog').open) $('auth-dialog').close();
   const me = await api('/auth/me'); $('model-name').textContent = me.model;
+  const cards = await api('/card-data');
+  $('card-state').textContent = cards.ready ? `卡牌 MCP 已就绪 · ${cards.source.fingerprint.slice(0,10)}` : '卡库未初始化 · 请先在服务端更新卡库';
   if (!me.model_configured) toast('服务端尚未配置DeepSeek Key，请先运行doctor。');
   await refreshSessions(); const saved = localStorage.getItem(`hearth-session-${user.id}`);
   if (saved && state.sessions.some(s => s.id === saved)) await selectSession(saved); else newConversation();
@@ -126,6 +131,7 @@ async function send() {
     await consumeSSE(response.body, async event => {
       if (event.type === 'turn_started') { state.turn = event.turn_id; $('run-id').textContent = event.run_id || `重放已完成请求 ${event.turn_id.slice(0,12)}`; }
       if (event.type === 'trace') observe(event);
+      if (event.type === 'answer_reset') {assistant.text.textContent='';assistant.hint.textContent=event.step>1?'工具结果已回填，正在继续回答…':'正在生成回复…';}
       if (event.type === 'cache') { $('metric-cache').textContent = event.hit ? '命中（未重新问答）' : '未命中'; if (event.hit) assistant.hint.textContent = '来自相同上下文的有效缓存'; }
       if (event.type === 'text_delta') { assistant.hint.textContent = '流式生成中…'; assistant.text.textContent += event.text; scrollDown(); }
       if (event.type === 'turn_completed') { complete = true; assistant.hint.textContent = event.replayed ? '已完成请求重放 · 未重复请求模型' : event.cached ? '缓存回答 · 完整会话已保存' : '回复完成 · 完整会话已保存'; }
@@ -180,6 +186,15 @@ $('profile').addEventListener('click',()=>openPreferences().catch(error=>toast(e
 $('close-preferences').addEventListener('click',()=>$('preferences-dialog').close());
 $('preferences-form').addEventListener('submit',async event=>{event.preventDefault();$('save-preferences').disabled=true;try { await savePreferences(Object.fromEntries(new FormData(event.target))); } catch(error) { $('preferences-error').textContent=error.message; } finally { $('save-preferences').disabled=false; }});
 $('clear-preferences').addEventListener('click',async()=>{if(confirm('删除全部已保存偏好？旧聊天和日志不会删除。')) { try { await savePreferences({}); } catch(error) { $('preferences-error').textContent=error.message; } }});
+$('download-log').addEventListener('click',async()=>{
+  if(!state.session||state.busy)return;
+  try{
+    const response=await fetch(`/api/sessions/${state.session}/log`,{credentials:'same-origin'});
+    if(!response.ok){const value=await response.json();throw new Error(value.detail||'日志下载失败');}
+    const url=URL.createObjectURL(await response.blob());const link=document.createElement('a');
+    link.href=url;link.download=`session-${state.session}-log.txt`;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+  }catch(error){toast(error.message);}
+});
 $('logout').addEventListener('click',async()=>{try{if(state.busy) await stop();await api('/auth/logout',{method:'POST',body:{}});state.user=null;state.session=null;state.sessions=[];$('messages').replaceChildren();$('welcome').classList.remove('hidden');$('username').textContent='尚未登录';$('user-avatar').textContent='?';renderSessions();resetInspector();showAuth();}catch(error){toast(error.message);}});
 $('toggle-inspector').addEventListener('click',()=>{const narrow=matchMedia('(max-width:1000px)').matches;const open=narrow ? $('inspector').classList.toggle('mobile-open') : !$('inspector').classList.toggle('is-hidden');$('toggle-inspector').setAttribute('aria-expanded',String(open));});
 $('menu').addEventListener('click',()=>$('sidebar').classList.toggle('mobile-open'));
